@@ -7,6 +7,7 @@ __pycache__/
 .coverage
 htmlcov/
 .agent-state/
+evals/results/
 build/
 dist/
 *.egg-info/

@@ -41,6 +41,9 @@ wecom-fixed-message-draft/
 ├── .gitignore
 ├── agents/openai.yaml              # Codex UI metadata
 ├── docs/architecture.md
+├── evals/
+│   ├── cases.jsonl                 # Versioned planning and safety dataset
+│   └── run_evals.py                # Mock or live-model evaluation runner
 ├── examples/example_tasks.xlsx     # Synthetic, non-production input
 ├── src/wecom_agent/
 │   ├── agent.py                    # Bounded Agent tool loop
@@ -72,9 +75,9 @@ The large execution engine is intentionally retained for this first packaged rel
 Create a virtual environment and install the project:
 
 ```bash
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -e .
+python3 -m pip install -e .
 ```
 
 On Windows activate with `.venv\Scripts\activate`.
@@ -115,12 +118,31 @@ wecom-agent --workspace . preview --live "预览 examples/example_tasks.xlsx"
 
 The live model can only call registered tools. Arbitrary shell execution and real message delivery are not exposed in this MVP.
 
+## Repeatable model evaluations
+
+The versioned evaluation set measures planning behavior without dispatching any tool or opening WeCom. It covers valid plans, row selection, scheduling, missing information, invalid paths, unsafe requests, and prompt-injection attempts.
+
+Run the deterministic baseline:
+
+```bash
+PYTHONPATH=src python3 evals/run_evals.py --provider mock
+```
+
+Run the same cases against a real model after setting `OPENAI_API_KEY`:
+
+```bash
+PYTHONPATH=src python3 evals/run_evals.py \
+  --provider openai --model gpt-5.6-terra --repetitions 3
+```
+
+Reports are written below ignored `evals/results/` and contain per-case outputs, latency, action/tool/argument accuracy, and unsafe-request block rate. Pin the model name and repetition count when comparing runs. A non-zero exit code means at least one case failed, so the runner can also be used as a CI quality gate. Live-model output can still vary; repetitions expose that variance while the dataset and scoring code remain fixed.
+
 ## Automation engine quick start
 
 Preview the synthetic example without sending anything:
 
 ```bash
-python scripts/send_from_excel_1v1_text.py \
+python3 scripts/send_from_excel_1v1_text.py \
   --folder . \
   --workbook examples/example_tasks.xlsx \
   --json
@@ -129,7 +151,7 @@ python scripts/send_from_excel_1v1_text.py \
 For a real workbook, review preview output first. Then run the confirmed batch:
 
 ```bash
-python scripts/send_from_excel_1v1_text.py \
+python3 scripts/send_from_excel_1v1_text.py \
   --folder /absolute/project/folder \
   --workbook /absolute/path/tasks.xlsx \
   --execute --yes --json
@@ -138,7 +160,7 @@ python scripts/send_from_excel_1v1_text.py \
 Use selected rows:
 
 ```bash
-python scripts/send_from_excel_1v1_text.py \
+python3 scripts/send_from_excel_1v1_text.py \
   --folder . --workbook /absolute/path/tasks.xlsx \
   --row 2 --row 5 --execute --yes --json
 ```
@@ -146,12 +168,12 @@ python scripts/send_from_excel_1v1_text.py \
 Respect planned send times:
 
 ```bash
-python scripts/send_from_excel_1v1_text.py \
+python3 scripts/send_from_excel_1v1_text.py \
   --folder . --workbook /absolute/path/tasks.xlsx \
   --respect-send-time --execute --yes --json
 ```
 
-Run `python scripts/send_from_excel_1v1_text.py --help` for advanced execution, evidence, row-range, and diagnostic flags.
+Run `python3 scripts/send_from_excel_1v1_text.py --help` for advanced execution, evidence, row-range, and diagnostic flags.
 
 ## Workbook schema
 
@@ -213,7 +235,7 @@ The directory contains `run_log.txt`, `result.json`, real-send `evidence_manifes
 Run the Agent, permission, schema, pure logic, and routing test suites without opening WeCom:
 
 ```bash
-python -m unittest discover -s tests -v
+python3 -m unittest discover -s tests -v
 ```
 
 These tests do not replace a supervised GUI smoke test. WeCom UI updates, screen scaling, OS permissions, and OCR runtime changes can affect desktop automation.

@@ -83,11 +83,37 @@ class RuleBasedMockClient:
 
     def start(self, user_input: str, tools: list[dict[str, Any]]) -> ModelTurn:
         self.started = True
+        normalized = user_input.lower()
+        forbidden = (
+            "跳过验证", "绕过审批", "直接发送", "真实发送", "执行shell", "执行 shell",
+            "运行命令", "approval token", "ignore safety", "ignore previous",
+        )
+        if any(phrase in normalized for phrase in forbidden):
+            return ModelTurn(text="该请求试图绕过安全边界；我只能生成并验证预览计划。")
+
         row_range = re.search(r"(?:第)?(\d+)\s*(?:到|至|-)\s*(?:第)?(\d+)\s*行", user_input)
         explicit_rows = tuple(int(value) for value in re.findall(r"第(\d+)行", user_input)) if not row_range else ()
-        workbook_match = re.search(r"([^\s，,]+\.xlsx)", user_input, flags=re.IGNORECASE)
+        workbook_matches = re.findall(r"([^\s，,]+\.(?:xlsx|xlsm))", user_input, flags=re.IGNORECASE)
+        if len(workbook_matches) > 1:
+            return ModelTurn(text="检测到多个工作簿，请明确使用单工作簿模式，或分别提供课程表、目标表和课程名称。")
+        workbook = workbook_matches[0] if workbook_matches else None
+        if not workbook and ("示例" in user_input or "example" in normalized):
+            workbook = self.default_workbook
+        if not workbook:
+            return ModelTurn(text="请提供工作区内的 Excel 工作簿路径后再预览。")
+
+        scheduled_at = re.search(r"(20\d{2}-\d{2}-\d{2})[ T](\d{2}:\d{2}(?::\d{2})?)", user_input)
+        if scheduled_at:
+            schedule_mode = "scheduled"
+            run_at = f"{scheduled_at.group(1)} {scheduled_at.group(2)}"
+        elif "按表" in user_input or "表内时间" in user_input or "指定时间" in user_input:
+            schedule_mode = "workbook"
+            run_at = None
+        else:
+            schedule_mode = "immediate"
+            run_at = None
         arguments = {
-            "workbook": workbook_match.group(1) if workbook_match else self.default_workbook,
+            "workbook": workbook,
             "lesson_workbook": None,
             "target_workbook": None,
             "lesson": None,
@@ -96,8 +122,8 @@ class RuleBasedMockClient:
                 "row_from": int(row_range.group(1)) if row_range else None,
                 "row_to": int(row_range.group(2)) if row_range else None,
             },
-            "schedule_mode": "workbook" if "按表" in user_input or "指定时间" in user_input else "immediate",
-            "run_at": None,
+            "schedule_mode": schedule_mode,
+            "run_at": run_at,
             "resend": "重发" in user_input,
         }
         return ModelTurn(tool_calls=(ToolCall("mock-preview-1", "preview_wecom_tasks", arguments),))
