@@ -10,8 +10,8 @@ import uuid
 from .agent import WeComAgent
 from .database import SQLiteStateStore
 from .execution_lock import ExecutionLock
-from .execution_policy import ApprovedTextTask, SupervisedExecutionPolicy, parse_allowed_targets
-from .execution_runner import RealWeComExecutionRunner
+from .execution_policy import ApprovedBatchTask, SupervisedBatchExecutionPolicy, parse_allowed_targets
+from .execution_runner import RealWeComBatchExecutionRunner
 from .model_client import OpenAIResponsesClient, RuleBasedMockClient
 from .permissions import ApprovalManager
 from .schemas import SendPlan
@@ -95,12 +95,12 @@ def main() -> None:
             snapshot=snapshot.as_dict(),
         )
         database.create_task(state)
-        policy = SupervisedExecutionPolicy(_allowed_targets(state_dir))
-        approved_text_task = policy.validate(plan)
+        policy = SupervisedBatchExecutionPolicy(_allowed_targets(state_dir))
+        approved_batch = policy.validate(plan)
         print("\n即将处理企业微信任务")
-        print(f"  联系人：{approved_text_task.target}")
-        print(f"  消息：{approved_text_task.message}")
-        print(f"  可发送：{preview.get('sendable_count', 0)} 条")
+        for index, task in enumerate(approved_batch.tasks, start=1):
+            print(f"  {index}. {task.target}：{task.message}")
+        print(f"  可发送：{approved_batch.count} 条")
         print(f"  模式：{'仅演练（不会发送）' if args.simulate else '真实发送'}")
         if not args.yes and not _confirm_send():
             print(json.dumps({"task_id": task_id, "status": "CANCELLED_BY_USER", "real_send": False}, ensure_ascii=False, indent=2))
@@ -120,7 +120,7 @@ def main() -> None:
             expected_snapshot=snapshot,
             approval_token=approval.token,
             simulate=args.simulate,
-            approved_text_task=approved_text_task,
+            approved_batch=approved_batch,
         )
         print(json.dumps({"task_id": task_id, **result}, ensure_ascii=False, indent=2))
         return
@@ -178,10 +178,10 @@ def main() -> None:
 
     if state.status != "AUTHORIZED":
         raise SystemExit(f"Task is not authorized: {state.status}")
-    approved_text_task = None
+    approved_batch = None
     if args.command == "execute":
-        policy = SupervisedExecutionPolicy(_allowed_targets(state_dir))
-        approved_text_task = policy.validate(plan)
+        policy = SupervisedBatchExecutionPolicy(_allowed_targets(state_dir))
+        approved_batch = policy.validate(plan)
     result = _run_authorized(
         workspace=workspace,
         state_dir=state_dir,
@@ -193,7 +193,7 @@ def main() -> None:
         expected_snapshot=expected_snapshot,
         approval_token=args.approval_token,
         simulate=args.command == "simulate",
-        approved_text_task=approved_text_task,
+        approved_batch=approved_batch,
     )
     print(json.dumps({"task_id": state.task_id, **result}, ensure_ascii=False, indent=2))
 
@@ -210,7 +210,7 @@ def _run_authorized(
     expected_snapshot: PlanSnapshot,
     approval_token: str,
     simulate: bool,
-    approved_text_task: ApprovedTextTask | None,
+    approved_batch: ApprovedBatchTask | None,
 ) -> dict[str, object]:
     approval = approvals.verify(state.task_id, state.plan_hash or "", approval_token)
     current_snapshot = assert_snapshot_unchanged(plan, expected_snapshot)
@@ -222,9 +222,12 @@ def _run_authorized(
         try:
             if simulate:
                 result = toolbox.simulate_verified(plan)
+                if approved_batch is not None:
+                    result["total"] = approved_batch.count
+                    result["targets"] = [task.target for task in approved_batch.tasks]
             else:
-                assert approved_text_task is not None
-                result = RealWeComExecutionRunner(workspace).execute(approved_text_task)
+                assert approved_batch is not None
+                result = RealWeComBatchExecutionRunner(workspace).execute(approved_batch)
             result["execution_id"] = execution_id
             result["idempotency_key"] = idempotency_key
             database.complete_execution(execution_id, "completed", result)
