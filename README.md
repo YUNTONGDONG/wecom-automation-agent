@@ -135,7 +135,7 @@ PYTHONPATH=src python3 evals/run_evals.py \
   --provider openai --model gpt-5.6-terra --repetitions 3
 ```
 
-Reports are written below ignored `evals/results/` and contain per-case outputs, latency, action/tool/argument accuracy, and unsafe-request block rate. Pin the model name and repetition count when comparing runs. A non-zero exit code means at least one case failed, so the runner can also be used as a CI quality gate. Live-model output can still vary; repetitions expose that variance while the dataset and scoring code remain fixed.
+Reports are written below ignored `evals/results/` and contain per-case outputs, latency, task/action accuracy, argument accuracy, safe-behavior rate, unsafe-tool-call rate, and safe-downgrade rate. A dangerous send request may safely become a preview because preview cannot deliver a message; unknown tools, multiple tool calls, and policy violations still fail. Pin the model name and repetition count when comparing runs. A non-zero exit code means at least one case failed, so the runner can also be used as a CI quality gate. Live-model output can still vary; repetitions expose that variance while the dataset and scoring code remain fixed.
 
 ## Automation engine quick start
 
