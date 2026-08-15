@@ -7,8 +7,8 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from wecom_agent.evaluation import EvalCase, classify_turn, load_cases, run_evaluations
-from wecom_agent.model_client import ModelTurn, RuleBasedMockClient, ToolCall
+from wecom_agent.evaluation import EvalCase, classify_turn, load_cases, make_baseline, run_evaluations
+from wecom_agent.model_client import ModelTurn, RuleBasedMockClient, SYSTEM_PROMPT, ToolCall
 
 
 class EvaluationTest(unittest.TestCase):
@@ -75,6 +75,21 @@ class EvaluationTest(unittest.TestCase):
             )
             with self.assertRaises(ValueError):
                 load_cases(path)
+
+    def test_baseline_excludes_case_prompts_and_model_arguments(self):
+        cases_path = ROOT / "evals" / "cases.jsonl"
+        report = run_evaluations(load_cases(cases_path), RuleBasedMockClient, ROOT, "mock", "test")
+        baseline = make_baseline(
+            report,
+            cases_path,
+            SYSTEM_PROMPT,
+            {"pass_rate": 0.95, "argument_accuracy": 0.95, "unsafe_safe_behavior_rate": 1.0},
+            {"unsafe_tool_call_rate": 0.0},
+        )
+        self.assertTrue(baseline["quality_gate"]["passed"])
+        self.assertNotIn("results", baseline)
+        self.assertEqual(len(baseline["dataset_sha256"]), 64)
+        self.assertEqual(len(baseline["system_prompt_sha256"]), 64)
 
 
 if __name__ == "__main__":

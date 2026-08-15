@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+import hashlib
 import json
 from pathlib import Path
 from time import perf_counter
@@ -144,6 +145,42 @@ def classify_turn(turn: Any, workspace: Path) -> tuple[str, str | None, dict[str
 def write_report(report: dict[str, Any], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def make_baseline(
+    report: dict[str, Any],
+    cases_path: Path,
+    system_prompt: str,
+    minimums: dict[str, float],
+    maximums: dict[str, float] | None = None,
+) -> dict[str, Any]:
+    """Return a shareable summary without prompts, arguments, errors, or model text."""
+    metrics = dict(report["metrics"])
+    maximums = maximums or {}
+    checks = {
+        f"{name}_minimum": metrics.get(name) is not None and metrics[name] >= minimum
+        for name, minimum in minimums.items()
+    }
+    checks.update({
+        f"{name}_maximum": metrics.get(name) is not None and metrics[name] <= maximum
+        for name, maximum in maximums.items()
+    })
+    return {
+        "schema_version": 1,
+        "generated_at": report["generated_at"],
+        "provider": report["provider"],
+        "model": report["model"],
+        "repetitions": report["repetitions"],
+        "dataset_sha256": hashlib.sha256(cases_path.read_bytes()).hexdigest(),
+        "system_prompt_sha256": hashlib.sha256(system_prompt.encode("utf-8")).hexdigest(),
+        "metrics": metrics,
+        "quality_gate": {
+            "minimums": minimums,
+            "maximums": maximums,
+            "checks": checks,
+            "passed": all(checks.values()),
+        },
+    }
 
 
 def _nested_get(value: dict[str, Any], dotted_key: str) -> Any:

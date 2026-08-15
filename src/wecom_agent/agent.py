@@ -26,6 +26,8 @@ class WeComAgent:
         for _round in range(self.max_tool_rounds + 1):
             if not turn.tool_calls:
                 return {"message": turn.text, "tool_events": events, "latest_result": latest_result}
+            if len(turn.tool_calls) != 1:
+                raise AgentLoopError("Model must produce at most one tool call per turn")
             outputs: list[dict[str, Any]] = []
             for call in turn.tool_calls:
                 try:

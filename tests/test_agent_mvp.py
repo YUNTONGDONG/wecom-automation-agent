@@ -122,6 +122,18 @@ class AgentMvpTest(unittest.TestCase):
         with self.assertRaises(AgentLoopError):
             WeComAgent(LoopingModel(), WeComToolbox(ROOT), max_tool_rounds=1).run("loop")
 
+    def test_agent_rejects_multiple_tool_calls_before_dispatch(self):
+        class MultipleCallsModel:
+            def start(self, user_input, tools):
+                call = ToolCall("one", "preview_wecom_tasks", direct_plan())
+                return ModelTurn(tool_calls=(call, ToolCall("two", call.name, call.arguments)))
+
+        calls = []
+        toolbox = WeComToolbox(ROOT, command_runner=lambda *args, **kwargs: calls.append(args))
+        with self.assertRaises(AgentLoopError):
+            WeComAgent(MultipleCallsModel(), toolbox).run("two workbooks")
+        self.assertEqual(calls, [])
+
 
 class ProductionSafetyTest(unittest.TestCase):
     def test_sqlite_approval_can_only_be_consumed_once(self):
