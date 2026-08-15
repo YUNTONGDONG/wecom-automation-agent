@@ -243,6 +243,8 @@ python3 -m unittest discover -s tests -v
 
 These tests do not replace a supervised GUI smoke test. WeCom UI updates, screen scaling, OS permissions, and OCR runtime changes can affect desktop automation.
 
+Pull requests and pushes to `main` run the same unit tests plus the deterministic Mock evaluation on Python 3.10, 3.11, and 3.12 through GitHub Actions. CI does not receive an OpenAI API key, call a live model, open WeCom, or send messages.
+
 ## Privacy and responsible use
 
 Only message recipients you are authorized to contact. Do not commit real contact lists, message content, screenshots, logs, generated workbooks, or session evidence. The included example uses fictional recipients and non-deliverable placeholder content.
