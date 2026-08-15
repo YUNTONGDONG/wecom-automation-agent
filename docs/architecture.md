@@ -1,5 +1,41 @@
 # Architecture
 
+## Agent layer
+
+```text
+Natural-language request
+    |
+    v
+Responses API or deterministic Mock model
+    |
+    v
+Bounded function-calling loop
+    |
+    v
+Strict SendPlan schema + workspace path policy
+    |
+    v
+Preview tool -> SQLite task + workbook snapshot -> human approval
+    |
+    v
+Plan-hash verification -> simulation
+```
+
+The Agent and automation engine are separate trust domains. The model may propose tool arguments, but application code validates every field. The model never receives the approval secret or approval token and cannot expose arbitrary shell commands. In the MVP, the Agent toolbox intentionally excludes both simulation and real sending; simulation is a separate human-operated CLI transition.
+
+SQLite persists tasks, token hashes, execution idempotency keys, per-delivery keys, and append-only audit events. Approval is valid for one exact task and plan hash, expires after ten minutes, and is atomically consumed once. Before execution, the system re-hashes every workbook plus the selected row values. A changed file invalidates approval.
+
+An exclusive lock file protects the single desktop/WeCom session. The lock contains a random ownership token and can only be removed by its owner. Database uniqueness constraints provide a second layer against duplicate execution or message delivery.
+
+Task states follow:
+
+```text
+DRAFT -> PREVIEWED -> AWAITING_CONFIRMATION -> AUTHORIZED
+      -> SIMULATING -> COMPLETED / FAILED
+```
+
+Future real execution must use a separate `EXECUTING` transition and retain the existing GUI safety checks. It must not reuse simulation as an implicit authorization for sending.
+
 ## Execution flow
 
 ```text

@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=70"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wecom-automation-agent"
+version = "0.2.0"
+description = "Safety-gated LLM agent for Excel-driven WeCom automation"
+requires-python = ">=3.10"
+dependencies = [
+  "openai>=2,<3",
+  "openpyxl>=3.1,<4",
+  "Pillow>=10,<13",
+  "PyAutoGUI>=0.9.54,<1",
+  "pyobjc-framework-Cocoa>=10,<13; platform_system == 'Darwin'",
+  "pyobjc-framework-Quartz>=10,<13; platform_system == 'Darwin'",
+  "pyobjc-framework-Vision>=10,<13; platform_system == 'Darwin'",
+]
+
+[project.scripts]
+wecom-agent = "wecom_agent.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
