@@ -1,0 +1,4 @@
+interface:
+  display_name: "WeCom Message Automation"
+  short_description: "Preview and safely execute Excel-driven WeCom messaging"
+  default_prompt: "Use $wecom-message-automation to preview and validate my Excel-driven WeCom message plan, then execute only after the target scope and safety checks are confirmed."

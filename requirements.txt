@@ -1,0 +1,6 @@
+openpyxl>=3.1,<4
+Pillow>=10,<13
+PyAutoGUI>=0.9.54,<1
+pyobjc-framework-Cocoa>=10,<13; platform_system == "Darwin"
+pyobjc-framework-Quartz>=10,<13; platform_system == "Darwin"
+pyobjc-framework-Vision>=10,<13; platform_system == "Darwin"

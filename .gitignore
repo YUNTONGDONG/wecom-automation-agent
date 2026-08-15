@@ -1,0 +1,28 @@
+.DS_Store
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Runtime evidence and generated delivery workbooks
+wechat-work-message-validation/
+logs/
+result.json
+evidence_manifest.json
+run_log.txt
+send_*_to_targets.xlsx
+
+# Keep only the synthetic example workbook under version control
+*.xlsx
+!examples/example_tasks.xlsx
+
+# Local screenshots and OCR/debug artifacts
+*.png
+*.jpg
+*.jpeg
+*.bmp
+*.tiff
+*.log
