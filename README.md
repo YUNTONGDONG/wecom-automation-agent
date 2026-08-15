@@ -92,6 +92,15 @@ Preview a natural-language request:
 wecom-agent --workspace . preview "预览 examples/example_tasks.xlsx"
 ```
 
+For the normal one-workbook workflow, use the one-click command. It keeps the same preview, snapshot, one-time approval, process lock, idempotency, execution verification, and audit trail internally, while asking the operator only once:
+
+```bash
+wecom-agent allow "Exact Test Contact" # one-time local setup
+wecom-agent send tasks.xlsx
+```
+
+The allowlist is stored only in ignored local Agent state. The send command shows the exact contact and message, then waits for `y/N`. Use `--simulate` to demonstrate the complete flow without opening WeCom. The lower-level `preview`, `approve`, and `execute` commands below remain available for debugging and audit demonstrations. `WECOM_ALLOWED_TARGETS` remains supported for CI and temporary overrides.
+
 The response includes a generated `task_id`. Approve that exact previewed plan. The returned approval token expires after ten minutes and is not stored in plaintext:
 
 ```bash
@@ -129,7 +138,7 @@ export WECOM_ALLOWED_TARGETS="Exact Test Contact"
 wecom-agent --workspace . execute <task_id> --approval-token <token>
 ```
 
-Policy rejection happens before approval consumption, so a corrected local allowlist can reuse the still-valid token. Real GUI execution remains unavailable in this milestone.
+Policy rejection happens before approval consumption, so a corrected local allowlist can reuse the still-valid token.
 
 ## Repeatable model evaluations
 
