@@ -14,12 +14,14 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from wecom_agent.execution_policy import (
     ExecutionPolicyDenied,
+    SupervisedBatchExecutionPolicy,
     SupervisedExecutionPolicy,
     parse_allowed_targets,
 )
 from wecom_agent.execution_runner import (
     FakeExecutionRunner,
     RealExecutionError,
+    RealWeComBatchExecutionRunner,
     RealWeComExecutionRunner,
 )
 from wecom_agent.database import SQLiteStateStore
@@ -84,6 +86,9 @@ class SupervisedExecutionPolicyTest(unittest.TestCase):
 
     def policy(self, *targets):
         return SupervisedExecutionPolicy(targets or ("授权测试对象",))
+
+    def batch_policy(self, *targets):
+        return SupervisedBatchExecutionPolicy(targets or ("授权测试对象", "授权测试对象二", "授权测试对象三"))
 
     def write_preview_sender_stub(self):
         sender = self.workspace / "scripts" / "send_from_excel_1v1_text.py"
@@ -193,6 +198,72 @@ class SupervisedExecutionPolicyTest(unittest.TestCase):
         with self.assertRaises(RealExecutionError):
             RealWeComExecutionRunner(self.workspace, unverified_runner).execute(task)
 
+    def test_batch_policy_allows_up_to_ten_unique_allowlisted_contacts(self):
+        rows = [self.valid_row(发送对象=f"测试对象{i}") for i in range(1, 11)]
+        self.write_rows(*rows)
+        batch = SupervisedBatchExecutionPolicy(tuple(f"测试对象{i}" for i in range(1, 11))).validate(self.plan())
+        self.assertEqual(batch.count, 10)
+        self.assertEqual(batch.tasks[0].row_number, 2)
+        self.assertEqual(batch.tasks[-1].row_number, 11)
+
+        self.write_rows(*rows, self.valid_row(发送对象="测试对象11"))
+        with self.assertRaises(ExecutionPolicyDenied):
+            SupervisedBatchExecutionPolicy(tuple(f"测试对象{i}" for i in range(1, 12))).validate(self.plan())
+
+    def test_batch_policy_rejects_unknown_or_duplicate_targets(self):
+        self.write_rows(
+            self.valid_row(),
+            self.valid_row(发送对象="未授权对象"),
+        )
+        with self.assertRaises(ExecutionPolicyDenied):
+            self.batch_policy().validate(self.plan())
+        self.write_rows(self.valid_row(), self.valid_row())
+        with self.assertRaises(ExecutionPolicyDenied):
+            self.batch_policy().validate(self.plan())
+
+    def test_batch_policy_skips_sent_and_disabled_rows_and_retries_failed_rows(self):
+        self.write_rows(
+            self.valid_row(发送状态="已发送"),
+            self.valid_row(发送对象="授权测试对象二", 是否发送="否"),
+            self.valid_row(发送对象="授权测试对象三", 发送状态="发送失败"),
+        )
+        batch = self.batch_policy().validate(self.plan())
+        self.assertEqual(batch.count, 1)
+        self.assertEqual(batch.tasks[0].target, "授权测试对象三")
+
+    def test_batch_runner_selects_every_approved_row_and_requires_full_success(self):
+        self.write_rows(
+            self.valid_row(),
+            self.valid_row(发送对象="授权测试对象二"),
+        )
+        batch = self.batch_policy().validate(self.plan())
+        sender = self.workspace / "scripts" / "send_from_excel_1v1_text.py"
+        sender.parent.mkdir()
+        sender.write_text("# test sender\n", encoding="utf-8")
+        calls = []
+
+        def successful_runner(command, **kwargs):
+            calls.append(command)
+            return subprocess.CompletedProcess(
+                command, 0, stdout=json.dumps({"success": 2, "late_success": 0, "failed": 0}), stderr="",
+            )
+
+        result = RealWeComBatchExecutionRunner(self.workspace, successful_runner).execute(batch)
+        self.assertEqual(result["mode"], "supervised_batch_real")
+        self.assertEqual(result["success"], 2)
+        selected_rows = [calls[0][index + 1] for index, value in enumerate(calls[0]) if value == "--row"]
+        self.assertEqual(selected_rows, ["2", "3"])
+        self.assertIn("--no-auto-batch-fast-dispatch", calls[0])
+        self.assertEqual(calls[0][calls[0].index("--between-rows") + 1], "0.5")
+
+        def partial_runner(command, **kwargs):
+            return subprocess.CompletedProcess(
+                command, 0, stdout=json.dumps({"success": 1, "late_success": 0, "failed": 1}), stderr="",
+            )
+
+        with self.assertRaises(RealExecutionError):
+            RealWeComBatchExecutionRunner(self.workspace, partial_runner).execute(batch)
+
     def test_allowlist_parser_trims_and_drops_empty_values(self):
         self.assertEqual(parse_allowed_targets(" 测试甲,测试乙, ,"), ("测试甲", "测试乙"))
 
@@ -299,6 +370,27 @@ class SupervisedExecutionPolicyTest(unittest.TestCase):
         payload = self.last_output_json(completed.stdout)
         self.assertEqual(payload["status"], "CANCELLED_BY_USER")
         self.assertFalse(payload["real_send"])
+
+    def test_one_click_send_previews_and_simulates_batch(self):
+        self.write_rows(
+            self.valid_row(),
+            self.valid_row(发送对象="授权测试对象二", 发送内容="第二条测试消息"),
+            self.valid_row(发送对象="授权测试对象三", 发送内容="第三条测试消息"),
+        )
+        self.write_preview_sender_stub()
+        command = [
+            sys.executable, "-m", "wecom_agent.cli", "--workspace", str(self.workspace),
+            "send", str(self.workbook), "--simulate", "--yes",
+        ]
+        environment = os.environ.copy()
+        environment["PYTHONPATH"] = str(ROOT / "src")
+        environment["WECOM_ALLOWED_TARGETS"] = "授权测试对象,授权测试对象二,授权测试对象三"
+        completed = subprocess.run(command, cwd=ROOT, env=environment, text=True, capture_output=True, check=False)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        payload = self.last_output_json(completed.stdout)
+        self.assertEqual(payload["total"], 3)
+        self.assertIn("1. 授权测试对象", completed.stdout)
+        self.assertIn("3. 授权测试对象三", completed.stdout)
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wecom-automation-agent"
-version = "0.2.0"
+version = "0.3.0"
 description = "Safety-gated LLM agent for Excel-driven WeCom automation"
 requires-python = ">=3.10"
 dependencies = [

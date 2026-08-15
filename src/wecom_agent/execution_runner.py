@@ -7,7 +7,7 @@ import subprocess
 import sys
 from typing import Any, Protocol
 
-from .execution_policy import ApprovedTextTask
+from .execution_policy import ApprovedBatchTask, ApprovedTextTask
 
 
 class ExecutionRunner(Protocol):
@@ -40,6 +40,22 @@ class RealWeComExecutionRunner:
     timeout_seconds: int = 300
 
     def execute(self, task: ApprovedTextTask) -> dict[str, Any]:
+        batch = ApprovedBatchTask(task.workbook, (task,))
+        result = RealWeComBatchExecutionRunner(
+            self.workspace, self.command_runner, self.timeout_seconds
+        ).execute(batch)
+        result["row_number"] = task.row_number
+        result["target"] = task.target
+        return result
+
+
+@dataclass(frozen=True)
+class RealWeComBatchExecutionRunner:
+    workspace: Path
+    command_runner: Any = subprocess.run
+    timeout_seconds: int = 1800
+
+    def execute(self, batch: ApprovedBatchTask) -> dict[str, Any]:
         sender = self.workspace / "scripts" / "send_from_excel_1v1_text.py"
         if not sender.is_file():
             raise RealExecutionError(f"WeCom sender not found: {sender}")
@@ -47,8 +63,7 @@ class RealWeComExecutionRunner:
             sys.executable,
             str(sender),
             "--folder", str(self.workspace),
-            "--workbook", task.workbook,
-            "--row", str(task.row_number),
+            "--workbook", batch.workbook,
             "--ignore-send-time",
             "--execute",
             "--yes",
@@ -56,7 +71,11 @@ class RealWeComExecutionRunner:
             "--test-disclaimer", "",
             "--save-each-row",
             "--stop-on-error",
+            "--no-auto-batch-fast-dispatch",
+            "--between-rows", "0.5",
         ]
+        for task in batch.tasks:
+            command.extend(["--row", str(task.row_number)])
         completed = self.command_runner(
             command,
             cwd=self.workspace,
@@ -69,19 +88,23 @@ class RealWeComExecutionRunner:
             detail = (completed.stderr or completed.stdout or "WeCom sender failed").strip()
             raise RealExecutionError(detail)
         payload = _last_json_object(completed.stdout)
-        if int(payload.get("success", 0)) + int(payload.get("late_success", 0)) != 1:
+        successful = int(payload.get("success", 0)) + int(payload.get("late_success", 0))
+        if successful != batch.count:
             raise RealExecutionError(
-                f"WeCom sender did not verify exactly one successful send: "
-                f"success={payload.get('success', 0)}, failed={payload.get('failed', 0)}"
+                f"WeCom sender did not verify the complete batch: expected={batch.count}, "
+                f"success={successful}, failed={payload.get('failed', 0)}"
             )
         if int(payload.get("failed", 0)) != 0:
             raise RealExecutionError("WeCom sender reported a failed row")
         return {
-            "mode": "supervised_real",
+            "mode": "supervised_real" if batch.count == 1 else "supervised_batch_real",
             "status": "completed",
             "real_send": True,
-            "row_number": task.row_number,
-            "target": task.target,
+            "total": batch.count,
+            "success": successful,
+            "failed": 0,
+            "rows": [task.row_number for task in batch.tasks],
+            "targets": [task.target for task in batch.tasks],
             "batch_id": payload.get("batch_id"),
             "run_dir": payload.get("run_dir"),
             "log_path": payload.get("log_path"),

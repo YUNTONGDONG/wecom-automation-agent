@@ -99,7 +99,7 @@ wecom-agent allow "Exact Test Contact" # one-time local setup
 wecom-agent send tasks.xlsx
 ```
 
-The allowlist is stored only in ignored local Agent state. The send command shows the exact contact and message, then waits for `y/N`. Use `--simulate` to demonstrate the complete flow without opening WeCom. The lower-level `preview`, `approve`, and `execute` commands below remain available for debugging and audit demonstrations. `WECOM_ALLOWED_TARGETS` remains supported for CI and temporary overrides.
+The allowlist is stored only in ignored local Agent state. The send command shows every exact contact and message, then waits for `y/N`. It supports up to ten unique, allowlisted individual contacts with immediate plain-text messages. Sent rows are skipped on a later run, each successful row is written back immediately, and the batch stops on the first failure. Use `--simulate` to demonstrate the complete flow without opening WeCom. The lower-level `preview`, `approve`, and `execute` commands below remain available for debugging and audit demonstrations. `WECOM_ALLOWED_TARGETS` remains supported for CI and temporary overrides.
 
 The response includes a generated `task_id`. Approve that exact previewed plan. The returned approval token expires after ten minutes and is not stored in plaintext:
 
@@ -129,7 +129,7 @@ The live model can only call registered tools. Arbitrary shell execution and rea
 
 ## Supervised execution safety milestone
 
-The `execute` command invokes the local WeCom GUI sender after consuming a valid one-time approval. Before execution, application code requires an exact local allowlist and enforces one direct workbook containing exactly one enabled, unsent, immediate, individual-contact, plain-text row with no attachments. The sender must verify exactly one successful delivery; otherwise the Agent records the execution as failed. Use `simulate` when you want to exercise the state machine without opening WeCom or sending a message.
+The `execute` command invokes the local WeCom GUI sender after consuming a valid one-time approval. Before execution, application code requires an exact local allowlist and enforces one direct workbook containing at most ten enabled, pending, immediate, unique individual-contact, plain-text rows with no attachments. The sender must verify the complete approved batch with zero failures; otherwise the Agent records the execution as failed. Use `simulate` when you want to exercise the state machine without opening WeCom or sending a message.
 
 Configure test targets locally; never commit real names:
 
