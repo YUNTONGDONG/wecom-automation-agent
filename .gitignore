@@ -6,6 +6,11 @@ __pycache__/
 .pytest_cache/
 .coverage
 htmlcov/
+.agent-state/
+evals/results/
+build/
+dist/
+*.egg-info/
 
 # Runtime evidence and generated delivery workbooks
 wechat-work-message-validation/

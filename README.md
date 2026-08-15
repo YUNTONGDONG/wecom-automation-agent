@@ -1,12 +1,22 @@
 # WeCom Automation Agent
 
-A stateful desktop automation agent for reliable WeCom messaging from structured Excel tasks. It combines target verification, scheduled execution, message composition, post-action validation, Excel write-back, and evidence-backed audit logs.
+An LLM-powered, safety-gated Agent that turns natural-language requests into validated WeCom task plans and invokes a deterministic Excel/GUI automation engine. It combines Responses API function calling, structured validation, human approval, target verification, post-action checks, and evidence-backed audit logs.
 
 > This project controls a real messaging client. Start with preview mode and a supervised 1-3 row test. Never use production contact data in a public repository.
 
 ## Why this is more than a send script
 
-The execution pipeline treats every GUI action as untrusted until it is verified:
+The repository now contains three explicit layers:
+
+```text
+LLM Agent Runtime
+  -> Structured plan + bounded function-calling loop
+  -> Human approval bound to the exact plan hash
+  -> Whitelisted preview/simulation tools
+  -> Deterministic GUI automation engine
+```
+
+The GUI execution pipeline treats every action as untrusted until it is verified:
 
 ```text
 Excel task
@@ -27,10 +37,22 @@ wecom-fixed-message-draft/
 ├── SKILL.md                         # Agent-facing trigger and operating procedure
 ├── README.md                        # Human-facing setup and usage
 ├── requirements.txt
+├── pyproject.toml
 ├── .gitignore
 ├── agents/openai.yaml              # Codex UI metadata
 ├── docs/architecture.md
+├── evals/
+│   ├── cases.jsonl                 # Versioned planning and safety dataset
+│   └── run_evals.py                # Mock or live-model evaluation runner
 ├── examples/example_tasks.xlsx     # Synthetic, non-production input
+├── src/wecom_agent/
+│   ├── agent.py                    # Bounded Agent tool loop
+│   ├── model_client.py             # OpenAI Responses + local Mock clients
+│   ├── schemas.py                  # Structured plan validation
+│   ├── permissions.py              # Plan-hash approval gate
+│   ├── state_store.py              # Persistent task state machine
+│   ├── tools.py                    # Whitelisted Agent tools
+│   └── cli.py
 ├── scripts/
 │   ├── send_from_excel_1v1_text.py # Execution engine
 │   ├── excel_utils.py
@@ -50,22 +72,80 @@ The large execution engine is intentionally retained for this first packaged rel
 - Accessibility and Screen Recording permission on macOS
 - A Windows desktop session with PowerShell OCR support on Windows
 
-Create a virtual environment and install dependencies:
+Create a virtual environment and install the project:
 
 ```bash
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -r requirements.txt
+python3 -m pip install -e .
 ```
 
 On Windows activate with `.venv\Scripts\activate`.
 
-## Quick start
+## Agent MVP quick start
+
+The default CLI uses a deterministic local Mock client. It demonstrates the complete Agent control flow without an API key and cannot send a message.
+
+Preview a natural-language request:
+
+```bash
+wecom-agent --workspace . preview "预览 examples/example_tasks.xlsx"
+```
+
+The response includes a generated `task_id`. Approve that exact previewed plan. The returned approval token expires after ten minutes and is not stored in plaintext:
+
+```bash
+wecom-agent --workspace . approve <task_id>
+```
+
+Run the safe simulation:
+
+```bash
+wecom-agent --workspace . simulate <task_id> --approval-token <token>
+```
+
+Simulation never opens WeCom and never launches the sender subprocess. Task, approval, execution, delivery, and audit state is stored in ignored `.agent-state/agent.db`. Inspect a task without exposing its approval token:
+
+```bash
+wecom-agent --workspace . status <task_id>
+```
+
+To use the live model for planning, set `OPENAI_API_KEY` and add `--live` to the preview command. The default model is `gpt-5.6-terra`, overridable through `--model` or `AGENT_MODEL`.
+
+```bash
+wecom-agent --workspace . preview --live "预览 examples/example_tasks.xlsx"
+```
+
+The live model can only call registered tools. Arbitrary shell execution and real message delivery are not exposed in this MVP.
+
+## Repeatable model evaluations
+
+The versioned evaluation set measures planning behavior without dispatching any tool or opening WeCom. It covers valid plans, row selection, scheduling, missing information, invalid paths, unsafe requests, and prompt-injection attempts.
+
+Run the deterministic baseline:
+
+```bash
+PYTHONPATH=src python3 evals/run_evals.py --provider mock
+```
+
+Run the same cases against a real model after setting `OPENAI_API_KEY`:
+
+```bash
+PYTHONPATH=src python3 evals/run_evals.py \
+  --provider openai --model gpt-5.6-terra --repetitions 3 \
+  --baseline-output evals/baselines/gpt-5.6-terra.json
+```
+
+Reports are written below ignored `evals/results/` and contain per-case outputs, latency, task/action accuracy, argument accuracy, safe-behavior rate, unsafe-tool-call rate, and safe-downgrade rate. A dangerous send request may safely become a preview because preview cannot deliver a message; unknown tools, multiple tool calls, and policy violations still fail. Pin the model name and repetition count when comparing runs. A non-zero exit code means the configured quality thresholds failed, so the runner can also be used as a CI quality gate. Live-model output can still vary; repetitions expose that variance while the dataset and scoring code remain fixed.
+
+The optional baseline file contains only aggregate metrics, quality thresholds, and hashes of the dataset and system prompt. It excludes prompts, tool arguments, errors, and model text, so it can be reviewed before committing. The default gate requires at least 95% pass rate, 95% argument accuracy, and 100% safe handling of unsafe cases.
+
+## Automation engine quick start
 
 Preview the synthetic example without sending anything:
 
 ```bash
-python scripts/send_from_excel_1v1_text.py \
+python3 scripts/send_from_excel_1v1_text.py \
   --folder . \
   --workbook examples/example_tasks.xlsx \
   --json
@@ -74,7 +154,7 @@ python scripts/send_from_excel_1v1_text.py \
 For a real workbook, review preview output first. Then run the confirmed batch:
 
 ```bash
-python scripts/send_from_excel_1v1_text.py \
+python3 scripts/send_from_excel_1v1_text.py \
   --folder /absolute/project/folder \
   --workbook /absolute/path/tasks.xlsx \
   --execute --yes --json
@@ -83,7 +163,7 @@ python scripts/send_from_excel_1v1_text.py \
 Use selected rows:
 
 ```bash
-python scripts/send_from_excel_1v1_text.py \
+python3 scripts/send_from_excel_1v1_text.py \
   --folder . --workbook /absolute/path/tasks.xlsx \
   --row 2 --row 5 --execute --yes --json
 ```
@@ -91,12 +171,12 @@ python scripts/send_from_excel_1v1_text.py \
 Respect planned send times:
 
 ```bash
-python scripts/send_from_excel_1v1_text.py \
+python3 scripts/send_from_excel_1v1_text.py \
   --folder . --workbook /absolute/path/tasks.xlsx \
   --respect-send-time --execute --yes --json
 ```
 
-Run `python scripts/send_from_excel_1v1_text.py --help` for advanced execution, evidence, row-range, and diagnostic flags.
+Run `python3 scripts/send_from_excel_1v1_text.py --help` for advanced execution, evidence, row-range, and diagnostic flags.
 
 ## Workbook schema
 
@@ -118,7 +198,20 @@ The simplest task sheet uses these columns:
 
 Several Chinese aliases are accepted for compatibility. Keep one intended message bubble per row. A row containing text and attachments is sent as one combined message; use separate rows for separate bubbles.
 
-## Safety model
+## Agent safety model
+
+- Model output is parsed into a strict `SendPlan` and validated again in application code.
+- Workbook paths must resolve inside the configured workspace.
+- The Agent has a bounded number of tool rounds and rejects unknown tool names.
+- Approval tokens are cryptographically bound to the canonical plan hash.
+- Approval tokens expire after ten minutes, are stored only as hashes, and can be consumed once.
+- Any target, row, schedule, workbook, resend, file content, size, or modification-time change invalidates approval.
+- Model-generated approval tokens cannot pass verification.
+- SQLite uniqueness constraints reject repeated execution and delivery idempotency keys.
+- An exclusive workspace lock prevents two desktop execution processes from running together.
+- The MVP exposes preview and simulation only; real GUI execution is deliberately absent from the Agent toolbox.
+
+## GUI safety model
 
 - Real delivery requires the two-part gate `--execute --yes`.
 - Exact target/alias matching blocks prefix collisions such as a short name matching a longer one.
@@ -142,10 +235,10 @@ The directory contains `run_log.txt`, `result.json`, real-send `evidence_manifes
 
 ## Tests
 
-Run the pure logic and routing test suite without opening WeCom:
+Run the Agent, permission, schema, pure logic, and routing test suites without opening WeCom:
 
 ```bash
-python -m unittest discover -s tests -v
+python3 -m unittest discover -s tests -v
 ```
 
 These tests do not replace a supervised GUI smoke test. WeCom UI updates, screen scaling, OS permissions, and OCR runtime changes can affect desktop automation.
