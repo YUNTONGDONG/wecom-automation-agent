@@ -118,6 +118,19 @@ wecom-agent --workspace . preview --live "预览 examples/example_tasks.xlsx"
 
 The live model can only call registered tools. Arbitrary shell execution and real message delivery are not exposed in this MVP.
 
+## Supervised execution safety milestone
+
+The development-only `execute` command currently uses a `FakeExecutionRunner`: it consumes a valid one-time approval and exercises the persistent execution state machine, but never imports the GUI sender, opens WeCom, or sends a message. Before Fake Runner execution, application code requires an exact local allowlist and enforces one direct workbook containing exactly one enabled, unsent, immediate, individual-contact, plain-text row with no attachments.
+
+Configure test targets locally; never commit real names:
+
+```bash
+export WECOM_ALLOWED_TARGETS="Exact Test Contact"
+wecom-agent --workspace . execute <task_id> --approval-token <token>
+```
+
+Policy rejection happens before approval consumption, so a corrected local allowlist can reuse the still-valid token. Real GUI execution remains unavailable in this milestone.
+
 ## Repeatable model evaluations
 
 The versioned evaluation set measures planning behavior without dispatching any tool or opening WeCom. It covers valid plans, row selection, scheduling, missing information, invalid paths, unsafe requests, and prompt-injection attempts.

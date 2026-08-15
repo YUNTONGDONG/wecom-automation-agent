@@ -10,6 +10,8 @@ import uuid
 from .agent import WeComAgent
 from .database import SQLiteStateStore
 from .execution_lock import ExecutionLock
+from .execution_policy import SupervisedExecutionPolicy, parse_allowed_targets
+from .execution_runner import FakeExecutionRunner
 from .model_client import OpenAIResponsesClient, RuleBasedMockClient
 from .permissions import ApprovalManager
 from .schemas import SendPlan
@@ -42,6 +44,9 @@ def build_parser() -> argparse.ArgumentParser:
     simulate = subparsers.add_parser("simulate", help="Consume approval and simulate once; never opens WeCom")
     simulate.add_argument("task_id")
     simulate.add_argument("--approval-token", required=True)
+    execute = subparsers.add_parser("execute", help="Run the supervised policy through a Fake Runner; never opens WeCom")
+    execute.add_argument("task_id")
+    execute.add_argument("--approval-token", required=True)
     return parser
 
 
@@ -108,12 +113,21 @@ def main() -> None:
         raise SystemExit(f"Task is not authorized: {state.status}")
     approval = approvals.verify(state.task_id, state.plan_hash or "", args.approval_token)
     current_snapshot = assert_snapshot_unchanged(plan, expected_snapshot)
+    approved_text_task = None
+    if args.command == "execute":
+        policy = SupervisedExecutionPolicy(parse_allowed_targets(os.environ.get("WECOM_ALLOWED_TARGETS")))
+        approved_text_task = policy.validate(plan)
     idempotency_key = execution_idempotency_key(state.task_id, state.plan_hash or "", current_snapshot.digest)
     lock = ExecutionLock(state_dir / "execution.lock", state.task_id)
     with lock:
-        execution_id = database.begin_execution_with_approval(approval, idempotency_key, "simulation")
+        mode = "simulation" if args.command == "simulate" else "supervised_fake"
+        execution_id = database.begin_execution_with_approval(approval, idempotency_key, mode)
         try:
-            result = toolbox.simulate_verified(plan)
+            if args.command == "simulate":
+                result = toolbox.simulate_verified(plan)
+            else:
+                assert approved_text_task is not None
+                result = FakeExecutionRunner().execute(approved_text_task)
             result["execution_id"] = execution_id
             result["idempotency_key"] = idempotency_key
             database.complete_execution(execution_id, "completed", result)
