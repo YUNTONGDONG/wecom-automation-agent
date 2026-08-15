@@ -17,7 +17,11 @@ from wecom_agent.execution_policy import (
     SupervisedExecutionPolicy,
     parse_allowed_targets,
 )
-from wecom_agent.execution_runner import FakeExecutionRunner
+from wecom_agent.execution_runner import (
+    FakeExecutionRunner,
+    RealExecutionError,
+    RealWeComExecutionRunner,
+)
 from wecom_agent.database import SQLiteStateStore
 from wecom_agent.permissions import ApprovalManager
 from wecom_agent.schemas import SendPlan
@@ -142,10 +146,45 @@ class SupervisedExecutionPolicyTest(unittest.TestCase):
         self.assertEqual(result["mode"], "supervised_fake")
         self.assertIn("not opened", result["message"])
 
+    def test_real_runner_uses_exact_approved_row_and_requires_verified_success(self):
+        self.write_rows(self.valid_row())
+        task = self.policy().validate(self.plan())
+        sender = self.workspace / "scripts" / "send_from_excel_1v1_text.py"
+        sender.parent.mkdir()
+        sender.write_text("# test sender\n", encoding="utf-8")
+        calls = []
+
+        def successful_runner(command, **kwargs):
+            calls.append((command, kwargs))
+            return subprocess.CompletedProcess(
+                command, 0, stdout=json.dumps({
+                    "success": 1, "late_success": 0, "failed": 0,
+                    "batch_id": "batch-test", "run_dir": "run-test",
+                }), stderr="",
+            )
+
+        result = RealWeComExecutionRunner(self.workspace, successful_runner).execute(task)
+        command = calls[0][0]
+        self.assertEqual(result["mode"], "supervised_real")
+        self.assertTrue(result["real_send"])
+        self.assertEqual(command[command.index("--row") + 1], "2")
+        self.assertIn("--execute", command)
+        self.assertIn("--yes", command)
+        self.assertIn("--save-each-row", command)
+        self.assertIn("--stop-on-error", command)
+
+        def unverified_runner(command, **kwargs):
+            return subprocess.CompletedProcess(
+                command, 0, stdout=json.dumps({"success": 0, "late_success": 0, "failed": 1}), stderr="",
+            )
+
+        with self.assertRaises(RealExecutionError):
+            RealWeComExecutionRunner(self.workspace, unverified_runner).execute(task)
+
     def test_allowlist_parser_trims_and_drops_empty_values(self):
         self.assertEqual(parse_allowed_targets(" 测试甲,测试乙, ,"), ("测试甲", "测试乙"))
 
-    def test_cli_policy_denial_does_not_consume_approval_then_fake_execute_succeeds(self):
+    def test_cli_policy_denial_does_not_consume_approval_then_real_execute_succeeds(self):
         self.write_rows(self.valid_row())
         plan = self.plan()
         snapshot = capture_plan_snapshot(plan)
@@ -166,6 +205,13 @@ class SupervisedExecutionPolicyTest(unittest.TestCase):
         approval = ApprovalManager(secret).issue(task.task_id, task.plan_hash or "")
         database.save_approval(approval)
 
+        sender = self.workspace / "scripts" / "send_from_excel_1v1_text.py"
+        sender.parent.mkdir()
+        sender.write_text(
+            "import json\nprint(json.dumps({'success': 1, 'late_success': 0, 'failed': 0, 'batch_id': 'test'}))\n",
+            encoding="utf-8",
+        )
+
         command = [
             sys.executable, "-m", "wecom_agent.cli", "--workspace", str(self.workspace),
             "execute", task.task_id, "--approval-token", approval.token,
@@ -181,8 +227,8 @@ class SupervisedExecutionPolicyTest(unittest.TestCase):
         completed = subprocess.run(command, cwd=ROOT, env=environment, text=True, capture_output=True, check=False)
         self.assertEqual(completed.returncode, 0, completed.stderr)
         result = json.loads(completed.stdout)
-        self.assertFalse(result["real_send"])
-        self.assertEqual(result["mode"], "supervised_fake")
+        self.assertTrue(result["real_send"])
+        self.assertEqual(result["mode"], "supervised_real")
         self.assertEqual(database.load_task(task.task_id).status, "COMPLETED")
 
 

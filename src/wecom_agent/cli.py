@@ -11,7 +11,7 @@ from .agent import WeComAgent
 from .database import SQLiteStateStore
 from .execution_lock import ExecutionLock
 from .execution_policy import SupervisedExecutionPolicy, parse_allowed_targets
-from .execution_runner import FakeExecutionRunner
+from .execution_runner import RealWeComExecutionRunner
 from .model_client import OpenAIResponsesClient, RuleBasedMockClient
 from .permissions import ApprovalManager
 from .schemas import SendPlan
@@ -44,7 +44,7 @@ def build_parser() -> argparse.ArgumentParser:
     simulate = subparsers.add_parser("simulate", help="Consume approval and simulate once; never opens WeCom")
     simulate.add_argument("task_id")
     simulate.add_argument("--approval-token", required=True)
-    execute = subparsers.add_parser("execute", help="Run the supervised policy through a Fake Runner; never opens WeCom")
+    execute = subparsers.add_parser("execute", help="Send one approved, allowlisted plain-text task through WeCom")
     execute.add_argument("task_id")
     execute.add_argument("--approval-token", required=True)
     return parser
@@ -120,14 +120,14 @@ def main() -> None:
     idempotency_key = execution_idempotency_key(state.task_id, state.plan_hash or "", current_snapshot.digest)
     lock = ExecutionLock(state_dir / "execution.lock", state.task_id)
     with lock:
-        mode = "simulation" if args.command == "simulate" else "supervised_fake"
+        mode = "simulation" if args.command == "simulate" else "supervised_real"
         execution_id = database.begin_execution_with_approval(approval, idempotency_key, mode)
         try:
             if args.command == "simulate":
                 result = toolbox.simulate_verified(plan)
             else:
                 assert approved_text_task is not None
-                result = FakeExecutionRunner().execute(approved_text_task)
+                result = RealWeComExecutionRunner(workspace).execute(approved_text_task)
             result["execution_id"] = execution_id
             result["idempotency_key"] = idempotency_key
             database.complete_execution(execution_id, "completed", result)

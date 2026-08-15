@@ -120,7 +120,7 @@ The live model can only call registered tools. Arbitrary shell execution and rea
 
 ## Supervised execution safety milestone
 
-The development-only `execute` command currently uses a `FakeExecutionRunner`: it consumes a valid one-time approval and exercises the persistent execution state machine, but never imports the GUI sender, opens WeCom, or sends a message. Before Fake Runner execution, application code requires an exact local allowlist and enforces one direct workbook containing exactly one enabled, unsent, immediate, individual-contact, plain-text row with no attachments.
+The `execute` command invokes the local WeCom GUI sender after consuming a valid one-time approval. Before execution, application code requires an exact local allowlist and enforces one direct workbook containing exactly one enabled, unsent, immediate, individual-contact, plain-text row with no attachments. The sender must verify exactly one successful delivery; otherwise the Agent records the execution as failed. Use `simulate` when you want to exercise the state machine without opening WeCom or sending a message.
 
 Configure test targets locally; never commit real names:
 
