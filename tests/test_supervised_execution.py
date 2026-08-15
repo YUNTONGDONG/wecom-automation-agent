@@ -85,6 +85,18 @@ class SupervisedExecutionPolicyTest(unittest.TestCase):
     def policy(self, *targets):
         return SupervisedExecutionPolicy(targets or ("授权测试对象",))
 
+    def write_preview_sender_stub(self):
+        sender = self.workspace / "scripts" / "send_from_excel_1v1_text.py"
+        sender.parent.mkdir(exist_ok=True)
+        sender.write_text(
+            "import json\nprint(json.dumps({'sendable_rows': 1, 'skipped_rows': 0, "
+            "'target_count': 1, 'batch_id': 'preview-test', 'run_dir': 'run-test'}))\n",
+            encoding="utf-8",
+        )
+
+    def last_output_json(self, output):
+        return json.loads(output[output.rfind("{\n"):])
+
     def test_allows_one_immediate_plain_text_row_for_exact_target(self):
         self.write_rows(self.valid_row())
         task = self.policy().validate(self.plan())
@@ -230,6 +242,63 @@ class SupervisedExecutionPolicyTest(unittest.TestCase):
         self.assertTrue(result["real_send"])
         self.assertEqual(result["mode"], "supervised_real")
         self.assertEqual(database.load_task(task.task_id).status, "COMPLETED")
+
+    def test_one_click_send_simulates_without_gui_and_hides_approval_token(self):
+        self.write_rows(self.valid_row())
+        self.write_preview_sender_stub()
+        command = [
+            sys.executable, "-m", "wecom_agent.cli", "--workspace", str(self.workspace),
+            "send", str(self.workbook), "--simulate", "--yes",
+        ]
+        environment = os.environ.copy()
+        environment["PYTHONPATH"] = str(ROOT / "src")
+        environment["WECOM_ALLOWED_TARGETS"] = "授权测试对象"
+        completed = subprocess.run(command, cwd=ROOT, env=environment, text=True, capture_output=True, check=False)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        payload = self.last_output_json(completed.stdout)
+        self.assertEqual(payload["mode"], "simulation")
+        self.assertFalse(payload.get("real_send", False))
+        self.assertNotIn("approval_token", completed.stdout)
+        database = SQLiteStateStore(self.workspace / ".agent-state" / "agent.db")
+        self.assertEqual(database.load_task(payload["task_id"]).status, "COMPLETED")
+
+    def test_allow_command_persists_local_target_for_one_click_send(self):
+        self.write_rows(self.valid_row())
+        self.write_preview_sender_stub()
+        base = [sys.executable, "-m", "wecom_agent.cli", "--workspace", str(self.workspace)]
+        environment = os.environ.copy()
+        environment["PYTHONPATH"] = str(ROOT / "src")
+        environment.pop("WECOM_ALLOWED_TARGETS", None)
+        configured = subprocess.run(
+            [*base, "allow", "授权测试对象"], cwd=ROOT, env=environment,
+            text=True, capture_output=True, check=False,
+        )
+        self.assertEqual(configured.returncode, 0, configured.stderr)
+        completed = subprocess.run(
+            [*base, "send", str(self.workbook), "--simulate", "--yes"], cwd=ROOT, env=environment,
+            text=True, capture_output=True, check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        payload = self.last_output_json(completed.stdout)
+        self.assertEqual(payload["mode"], "simulation")
+
+    def test_one_click_send_defaults_to_cancel_when_not_confirmed(self):
+        self.write_rows(self.valid_row())
+        self.write_preview_sender_stub()
+        command = [
+            sys.executable, "-m", "wecom_agent.cli", "--workspace", str(self.workspace),
+            "send", str(self.workbook),
+        ]
+        environment = os.environ.copy()
+        environment["PYTHONPATH"] = str(ROOT / "src")
+        environment["WECOM_ALLOWED_TARGETS"] = "授权测试对象"
+        completed = subprocess.run(
+            command, cwd=ROOT, env=environment, input="n\n", text=True, capture_output=True, check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        payload = self.last_output_json(completed.stdout)
+        self.assertEqual(payload["status"], "CANCELLED_BY_USER")
+        self.assertFalse(payload["real_send"])
 
 
 if __name__ == "__main__":
